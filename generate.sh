@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# مصنع المشاريع — يولّد docs/ai كاملة ومُعبّأة لمشروع جديد أو قائم.
+# مصنع المشاريع — يولّد docs/ai (وهيكل الكود الأساسي إن رغبت) لمشروع جديد أو قائم.
 # الاستخدام: bash generate.sh
 
 set -euo pipefail
@@ -13,11 +13,13 @@ echo "🏭 مصنع مشاريع PalWakf — الإصدار $FACTORY_VERSION"
 echo "════════════════════════════════════════════"
 echo
 
-read -rp "اسم المشروع: " PROJECT_NAME
+read -rp "اسم المشروع (يمكن أن يكون عربيًا): " PROJECT_NAME
 if [[ -z "$PROJECT_NAME" ]]; then
   echo "❌ اسم المشروع إلزامي." >&2
   exit 1
 fi
+
+read -rp "معرّف المشروع بالإنجليزية (يُستخدم في pubspec.yaml/package.json — اتركه فارغًا للاشتقاق التلقائي): " PROJECT_SLUG_INPUT
 
 read -rp "نوع المشروع (web/mobile/api/cli) [web]: " PROJECT_TYPE
 PROJECT_TYPE=${PROJECT_TYPE:-web}
@@ -31,7 +33,7 @@ read -rp "هدف المشروع (سطر أو سطران): " PROJECT_GOAL
 
 echo
 echo "اختر النمط التقني:"
-echo "  1) generic              — غير محدد الحزمة (تملأ TECH_STACK يدويًا)"
+echo "  1) generic              — غير محدد الحزمة (تملأ TECH_STACK يدويًا، بلا هيكل كود جاهز)"
 echo "  2) flutter-supabase     — Flutter + Supabase"
 echo "  3) react-vite-supabase  — React + Vite + Supabase"
 read -rp "اختيارك [1]: " PROFILE_CHOICE
@@ -76,27 +78,71 @@ print(json.dumps(sys.argv[1:], ensure_ascii=False))
   fi
 fi
 
+# هل يوجد هيكل كود جاهز (scaffold) لهذا النمط؟
+SCAFFOLD_DIR="$PROFILES_DIR/$PROFILE_NAME/scaffold"
+GENERATE_SCAFFOLD="n"
+if [[ -d "$SCAFFOLD_DIR" ]]; then
+  echo
+  read -rp "هل تريد أيضًا توليد هيكل الكود الأساسي (pubspec.yaml أو package.json + بنية المجلدات)؟ (y/n) [y]: " SCAFFOLD_ANSWER
+  SCAFFOLD_ANSWER=${SCAFFOLD_ANSWER:-y}
+  [[ "$SCAFFOLD_ANSWER" =~ ^[yY]$ ]] && GENERATE_SCAFFOLD="y"
+fi
+
 echo
-read -rp "مسار مجلد الإخراج (سيُنشأ فيه docs/ai): " OUTPUT_DIR
+read -rp "مسار مجلد الإخراج (سيُنشأ فيه docs/ai وهيكل الكود): " OUTPUT_DIR
 if [[ -z "$OUTPUT_DIR" ]]; then
   echo "❌ مسار الإخراج إلزامي." >&2
   exit 1
 fi
 
 PROJECT_DATE="$(date +%Y-%m-%d)"
+mkdir -p "$OUTPUT_DIR"
 
+# 1) وثّق docs/ai: القاعدة العامة أولًا، ثم تراكب النمط المختار فوقها
 mkdir -p "$OUTPUT_DIR/docs/ai"
-
 cp -r "$PROFILES_DIR/generic/docs/ai/." "$OUTPUT_DIR/docs/ai/"
 if [[ "$PROFILE_NAME" != "generic" ]]; then
   cp -r "$PROFILES_DIR/$PROFILE_NAME/docs/ai/." "$OUTPUT_DIR/docs/ai/"
 fi
 
+# 2) هيكل الكود (اختياري) — لا يستبدل أي ملف موجود مسبقًا (no-clobber)
+SCAFFOLD_APPLIED="false"
+if [[ "$GENERATE_SCAFFOLD" == "y" ]]; then
+  BEFORE_COUNT=$(find "$OUTPUT_DIR" -type f | wc -l)
+  cp -rn "$SCAFFOLD_DIR/." "$OUTPUT_DIR/"
+  AFTER_COUNT=$(find "$OUTPUT_DIR" -type f | wc -l)
+  SCAFFOLD_APPLIED="true"
+  if [[ "$AFTER_COUNT" -lt $((BEFORE_COUNT + $(find "$SCAFFOLD_DIR" -type f | wc -l))) ]]; then
+    echo "ℹ️  بعض ملفات الهيكل كانت موجودة مسبقًا في $OUTPUT_DIR ولم تُستبدل (لحماية عملك الحالي)."
+  fi
+fi
+
+# 3) اشتقاق المعرّفات البرمجية (slug) + بناء ملف الإعداد + الاستبدال الفعلي
+if [[ "$DB_SHARED" == "true" ]]; then
+  DB_SHARED_PY="True"
+else
+  DB_SHARED_PY="False"
+fi
+
 CONFIG_FILE="$(mktemp)"
 python3 -c "
-import json
+import json, re
+
+name = '''$PROJECT_NAME'''
+slug_input = '''$PROJECT_SLUG_INPUT'''.strip()
+raw = slug_input or name
+raw = raw.lower()
+raw = re.sub(r'[^a-z0-9]+', '_', raw).strip('_')
+if not raw:
+    raw = 'my_project'
+if raw[0].isdigit():
+    raw = 'p_' + raw
+slug_snake = raw
+slug_kebab = raw.replace('_', '-')
+class_name = ''.join(part.capitalize() for part in raw.split('_') if part) or 'MyProject'
+
 config = {
-    'PROJECT_NAME': '''$PROJECT_NAME''',
+    'PROJECT_NAME': name,
     'PROJECT_TYPE': '''$PROJECT_TYPE''',
     'PROJECT_STATUS': '''$PROJECT_STATUS''',
     'PROJECT_OWNER': '''$PROJECT_OWNER''',
@@ -104,27 +150,33 @@ config = {
     'PROJECT_GOAL': '''$PROJECT_GOAL''',
     'PROFILE_NAME': '''$PROFILE_NAME''',
     'FACTORY_VERSION': '''$FACTORY_VERSION''',
-    'DB_SHARED': $DB_SHARED,
+    'DB_SHARED': $DB_SHARED_PY,
     'RELATED_SYSTEMS': $RELATED_SYSTEMS_JSON,
+    'SLUG_SNAKE': slug_snake,
+    'SLUG_KEBAB': slug_kebab,
+    'CLASS_NAME': class_name,
 }
 with open('$CONFIG_FILE', 'w', encoding='utf-8') as f:
     json.dump(config, f, ensure_ascii=False)
+print(f'   المعرّف البرمجي المشتق: {slug_snake} (Dart) / {slug_kebab} (npm) / {class_name} (اسم الصنف)')
 "
 
-python3 "$FACTORY_DIR/substitute.py" "$OUTPUT_DIR/docs/ai" "$CONFIG_FILE"
+python3 "$FACTORY_DIR/substitute.py" "$OUTPUT_DIR" "$CONFIG_FILE"
 rm -f "$CONFIG_FILE"
 
+# 4) سجّل المشروع في السجل المركزي بالمصنع
 if [[ ! -f "$REGISTRY_FILE" ]]; then
   echo "⚠️  لم أجد $REGISTRY_FILE — تأكد من وجوده في مجلد المصنع." >&2
 else
-  printf '| %s | %s | %s | %s | %s | %s |\n' \
-    "$PROJECT_NAME" "$PROFILE_NAME" "$PROJECT_STATUS" "$PROJECT_DATE" "$OUTPUT_DIR" "$DB_SHARED" \
+  printf '| %s | %s | %s | %s | %s | %s | %s |\n' \
+    "$PROJECT_NAME" "$PROFILE_NAME" "$PROJECT_STATUS" "$PROJECT_DATE" "$OUTPUT_DIR" "$DB_SHARED" "$SCAFFOLD_APPLIED" \
     >> "$REGISTRY_FILE"
   echo "📋 سُجِّل المشروع في $REGISTRY_FILE"
 fi
 
 echo
-echo "🎉 تم توليد docs/ai بنجاح في: $OUTPUT_DIR/docs/ai"
+echo "🎉 تم توليد المشروع بنجاح في: $OUTPUT_DIR"
 echo "   النمط المستخدم: $PROFILE_NAME"
-echo "   الخطوة التالية: افتح 00_MASTER_CONTEXT.md وأكمل الحقول المتبقية بين [أقواس]،"
-echo "   ثم اتبع IMPLEMENTATION_PLAN.md لتفعيل الحزمة فعليًا."
+echo "   هيكل الكود: $([ "$SCAFFOLD_APPLIED" == "true" ] && echo "تم توليده" || echo "لم يُطلب")"
+echo "   الخطوة التالية: افتح docs/ai/00_MASTER_CONTEXT.md وأكمل الحقول بين [أقواس]،"
+echo "   ثم اتبع docs/ai/IMPLEMENTATION_PLAN.md لتفعيل الحزمة فعليًا."

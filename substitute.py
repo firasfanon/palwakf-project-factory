@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
 محرك استبدال المتغيرات لمصنع المشاريع (palwakf-project-factory).
-يقرأ ملف إعداد JSON، ويستبدل {{TOKEN}} في كل ملفات .md داخل مجلد الإخراج.
+يقرأ ملف إعداد JSON، ويستبدل {{TOKEN}} في كل ملف نصي داخل مجلد الإخراج
+(md, yaml, json, dart, ts/tsx, html, .env.example, .gitignore... أي ملف قابل للقراءة كنص UTF-8).
 لا يعتمد على مكتبات خارجية — Python القياسية فقط.
 """
 import json
 import sys
 from pathlib import Path
 
+SKIP_DIR_NAMES = {".git", "node_modules", ".dart_tool", "build", "dist"}
+
 
 def build_related_systems_rows(related_systems):
-    """يحوّل قائمة أنظمة إلى صفوف جدول Markdown."""
     if not related_systems:
         return "| — | — | لا توجد أنظمة مرتبطة حاليًا |"
     rows = []
@@ -46,16 +48,27 @@ def main():
         "FACTORY_VERSION": config.get("FACTORY_VERSION", "0.0.0"),
         "DB_SHARED_NOTE": "نعم — راجع جدول الأنظمة المرتبطة أدناه قبل أي تعديل بنيوي" if db_shared else "لا",
         "RELATED_SYSTEMS_ROWS": build_related_systems_rows(related_systems),
+        "SLUG_SNAKE": config.get("SLUG_SNAKE", "my_project"),
+        "SLUG_KEBAB": config.get("SLUG_KEBAB", "my-project"),
+        "CLASS_NAME": config.get("CLASS_NAME", "MyProject"),
     }
 
-    md_files = list(target_dir.rglob("*.md"))
-    if not md_files:
-        print(f"⚠️  لم أجد أي ملف .md داخل {target_dir}", file=sys.stderr)
+    all_files = [
+        p for p in target_dir.rglob("*")
+        if p.is_file() and not any(part in SKIP_DIR_NAMES for part in p.parts)
+    ]
+    if not all_files:
+        print(f"⚠️  لم أجد أي ملف داخل {target_dir}", file=sys.stderr)
         sys.exit(1)
 
     changed = 0
-    for file_path in md_files:
-        text = file_path.read_text(encoding="utf-8")
+    skipped_binary = 0
+    for file_path in all_files:
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, IsADirectoryError):
+            skipped_binary += 1
+            continue
         original = text
         for key, value in tokens.items():
             text = text.replace("{{" + key + "}}", value)
@@ -63,7 +76,8 @@ def main():
             file_path.write_text(text, encoding="utf-8")
             changed += 1
 
-    print(f"✅ تم استبدال المتغيرات في {changed} ملف من أصل {len(md_files)}.")
+    print(f"✅ تم استبدال المتغيرات في {changed} ملف من أصل {len(all_files)} "
+          f"(تجاهلت {skipped_binary} ملفًا ثنائيًا).")
 
 
 if __name__ == "__main__":
