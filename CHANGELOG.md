@@ -5,6 +5,9 @@
 
 ## [Unreleased] — Prompt Maker consumer adapter (لم يُرقَّم VERSION بعد)
 
+### أُصلح (اختبارات فقط) — FACTORY-PYTHON-PREFLIGHT-V1
+- `bash_has_python3` صار تحققًا تنفيذيًا محدود الزمن (تشغيل `python3 -c` فعليًا والتحقق من المخرج والخروج 0) بدل `command -v`، لأن اختصار Microsoft Store على ويندوز يُعثر عليه بـ`command -v` ولا يعمل. 7 اختبارات انحدار (stub فاشل، مخرج خاطئ، تعليق مع timeout، لا python، bash مفقود، python سليم). لا تغيير في `generate.sh` أو adapter أو القوالب أو الـpins.
+
 ### أُضيف
 - `consumer/adapter.py`: مستهلك `FACTORY_CONSUMER_SUBSET_V1` (Blueprint 1.1) بخمس نتائج مجمّدة، توليد حقيقي غير تفاعلي
   عند `MATERIALIZATION_READY` فقط، no-clobber، تهريب حسب صيغة الملف، وprovenance لكل مخرج.

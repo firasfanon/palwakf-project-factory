@@ -399,12 +399,23 @@ def find_bash():
     return None
 
 
-def bash_has_python3(bash):
+PY_PREFLIGHT_PROBE = "import sys; sys.stdout.write('PREFLIGHT_OK:%d' % sys.version_info[0])"
+PY_PREFLIGHT_EXPECTED = b"PREFLIGHT_OK:3"
+
+
+def bash_has_python3(bash, env=None, timeout=20):
+    """Bounded EXECUTABLE verification of `python3` as seen by `bash`.
+
+    `command -v python3` only proves a name resolves (e.g. the Windows Store alias stub resolves but
+    cannot run). Here python3 must actually start, run a one-line program within `timeout` seconds,
+    exit 0 and print the exact expected Python-3 token. Any failure, hang, wrong output or missing
+    interpreter -> False (fail closed: the dependent tests are skipped, never run against a broken python)."""
     try:
-        r = subprocess.run([bash, "-c", "command -v python3 >/dev/null 2>&1"], capture_output=True, timeout=30)
-        return r.returncode == 0
+        r = subprocess.run([bash, "-c", 'python3 -c "$1"', "bash", PY_PREFLIGHT_PROBE],
+                           capture_output=True, timeout=timeout, env=env, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return False
+    return r.returncode == 0 and r.stdout.strip() == PY_PREFLIGHT_EXPECTED
 
 
 def snapshot_text_normalized(d):
@@ -452,6 +463,55 @@ def answers(name, slug, ptype, status, owner, goal, profile, db_shared, related,
         lines.append(scaffold)
     lines.append(out)
     return "\n".join(lines) + "\n"
+
+
+@unittest.skipUnless(BASH is not None, "no usable bash on this host")
+class PythonPreflightTests(unittest.TestCase):
+    """bash_has_python3 must verify an EXECUTABLE python3, not mere command presence (regression for the
+    Windows Store `python3` alias, which resolves with `command -v` but cannot run)."""
+
+    @staticmethod
+    def env_with_fake(tmp, body):
+        fake = Path(tmp) / "python3"
+        fake.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8", newline="\n")
+        fake.chmod(0o755)
+        return dict(os.environ, PATH=Path(tmp).as_posix() + os.pathsep + os.environ.get("PATH", ""))
+
+    def test_old_presence_check_is_fooled_by_a_stub_but_new_check_is_not(self):
+        with tempfile.TemporaryDirectory() as t:
+            env = self.env_with_fake(t, "echo 'Python was not found; run without arguments to install from the Microsoft Store' >&2; exit 9")
+            presence = subprocess.run([BASH, "-c", "command -v python3 >/dev/null 2>&1"], env=env, capture_output=True)
+            self.assertEqual(presence.returncode, 0, "premise: the stub is found by a presence check")
+            self.assertFalse(bash_has_python3(BASH, env=env))
+
+    def test_stub_exiting_nonzero_is_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.assertFalse(bash_has_python3(BASH, env=self.env_with_fake(t, "exit 1")))
+
+    def test_exit_zero_with_wrong_output_is_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.assertFalse(bash_has_python3(BASH, env=self.env_with_fake(t, "echo not-python; exit 0")))
+            self.assertFalse(bash_has_python3(BASH, env=self.env_with_fake(t, "printf 'PREFLIGHT_OK:2'; exit 0")))
+
+    def test_hanging_python_is_bounded_by_timeout(self):
+        import time
+        with tempfile.TemporaryDirectory() as t:
+            started = time.monotonic()
+            self.assertFalse(bash_has_python3(BASH, env=self.env_with_fake(t, "sleep 30"), timeout=1))
+            self.assertLess(time.monotonic() - started, 15, "preflight must be bounded")
+
+    @unittest.skipIf(os.name == "nt", "PATH isolation needs a POSIX layout")
+    def test_no_python_on_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.assertFalse(bash_has_python3(BASH, env=dict(os.environ, PATH=t)))
+
+    def test_missing_bash_is_rejected(self):
+        self.assertFalse(bash_has_python3(str(Path(tempfile.gettempdir()) / "no-such-bash-binary")))
+
+    def test_working_python_is_accepted(self):
+        with tempfile.TemporaryDirectory() as t:
+            env = self.env_with_fake(t, 'exec "%s" "$@"' % Path(sys.executable).as_posix())
+            self.assertTrue(bash_has_python3(BASH, env=env))
 
 
 @unittest.skipUnless(HAS_BASH, "bash with python3 not available on this host")
