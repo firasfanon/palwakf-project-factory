@@ -3,6 +3,21 @@
 يوثّق هذا الملف كل تغيير جوهري في قوالب `palwakf-project-factory` عبر إصداراتها،
 وفق سياسة الترقيم في `UPDATE_POLICY.md` (PATCH / MINOR / MAJOR).
 
+## [Unreleased] — Prompt Maker consumer adapter (لم يُرقَّم VERSION بعد)
+
+### أُضيف
+- `consumer/adapter.py`: مستهلك `FACTORY_CONSUMER_SUBSET_V1` (Blueprint 1.1) بخمس نتائج مجمّدة، توليد حقيقي غير تفاعلي
+  عند `MATERIALIZATION_READY` فقط، no-clobber، تهريب حسب صيغة الملف، وprovenance لكل مخرج.
+- `consumer/pin/` + `tests/fixtures/prompt-maker/`: نسخ مثبّتة (SHA-256) من عقد Prompt Maker commit `f659f92d` — ليست سلطة عقد.
+- `tests/test_consumer_adapter.py`: 38 اختبارًا (مصفوفة fixtures، pin، no-clobber، injection، secret residue، تطابق `generate.sh` القديم مع baseline).
+- `.gitattributes` لتثبيت LF على الملفات المثبّتة.
+
+### تغيّر
+- `substitute.py`: استُخرجت `build_tokens()` دون تغيير السلوك (يُثبته اختبار التكافؤ).
+
+### حدود معروفة
+- لم يُتحقق من `npm install/build/test` للمشروع المولَّد (سجل npm محجوب 403 في بيئة التطوير)؛ فُحص فقط بناء TypeScript النحوي.
+
 ## [1.1.0] — إضافة توليد هيكل الكود (Scaffold)
 
 ### أُضيف

@@ -23,21 +23,11 @@ def build_related_systems_rows(related_systems):
     return "\n".join(rows)
 
 
-def main():
-    if len(sys.argv) != 3:
-        print("الاستخدام: python3 substitute.py <target_dir> <config.json>", file=sys.stderr)
-        sys.exit(1)
-
-    target_dir = Path(sys.argv[1])
-    config_path = Path(sys.argv[2])
-
-    with open(config_path, encoding="utf-8") as f:
-        config = json.load(f)
-
+def build_tokens(config):
+    """يبني خريطة المتغيرات من ملف الإعداد (مستخرَجة من main دون تغيير السلوك)."""
     db_shared = config.get("DB_SHARED", False)
     related_systems = config.get("RELATED_SYSTEMS", [])
-
-    tokens = {
+    return {
         "PROJECT_NAME": config.get("PROJECT_NAME", "[اسم المشروع]"),
         "PROJECT_TYPE": config.get("PROJECT_TYPE", "[نوعه]"),
         "PROJECT_STATUS": config.get("PROJECT_STATUS", "[الحالة]"),
@@ -52,6 +42,20 @@ def main():
         "SLUG_KEBAB": config.get("SLUG_KEBAB", "my-project"),
         "CLASS_NAME": config.get("CLASS_NAME", "MyProject"),
     }
+
+
+def main():
+    if len(sys.argv) != 3:
+        print("الاستخدام: python3 substitute.py <target_dir> <config.json>", file=sys.stderr)
+        sys.exit(1)
+
+    target_dir = Path(sys.argv[1])
+    config_path = Path(sys.argv[2])
+
+    with open(config_path, encoding="utf-8") as f:
+        config = json.load(f)
+
+    tokens = build_tokens(config)
 
     all_files = [
         p for p in target_dir.rglob("*")

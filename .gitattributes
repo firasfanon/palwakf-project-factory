@@ -1,0 +1,4 @@
+consumer/pin/** text eol=lf
+tests/fixtures/prompt-maker/** text eol=lf
+*.sh text eol=lf
+*.py text eol=lf

@@ -1,0 +1,25 @@
+{
+  "pin_version": 1,
+  "authority_statement": "Prompt Maker is the producer-contract authority. Files pinned here are PINNED TEST/CONFIG INPUTS, not contract authority. Any mismatch fails closed.",
+  "producer_repository": "firasfanon/Palwakf_Prompt_Maker",
+  "producer_base_head": "afbb5aa9d16b4a7c586296ad8371d5b835bb8dbf",
+  "producer_contract_commit": "f659f92d34449f093de05be6cc52a7f6c5221c84",
+  "producer_contract_tree": "66cc991c508480819ede80c16f78dafe278682de",
+  "project_blueprint_schema": "1.1",
+  "consumer_subset_version": 1,
+  "fixture_version": 1,
+  "golden_fixture_sha256": "df3e618dc3ef9abaf3878b3a6cda81e3c55f01b78182fc49ffe4b79160aa222e",
+  "profile_mapping_sha256": "74b71c798e1f73b41450cf8a5b93e2e7c1183f70bb7146f4f78377332c0fa5ec",
+  "consumer_schema_sha256": "c0ce0b73a1e8e80697216445c10e654fc2f0ea5cbc32cdc8617c6ebb681ca9cb",
+  "sha256_basis": "file bytes with CRLF normalized to LF",
+  "files": {
+    "consumer/pin/consumer-subset-v1.schema.json": "c0ce0b73a1e8e80697216445c10e654fc2f0ea5cbc32cdc8617c6ebb681ca9cb",
+    "consumer/pin/profile-mapping-v1.json": "74b71c798e1f73b41450cf8a5b93e2e7c1183f70bb7146f4f78377332c0fa5ec",
+    "tests/fixtures/prompt-maker/golden-react-vite-supabase.json": "df3e618dc3ef9abaf3878b3a6cda81e3c55f01b78182fc49ffe4b79160aa222e",
+    "tests/fixtures/prompt-maker/manifest.json": "844c8c9bcd8e996643f56dd57bcb952567c3c163e633353b5b367b8da447e4b1",
+    "tests/fixtures/prompt-maker/negative-invalid-consumer-subset.json": "d5a99bb9a4e0d9a0dbaff9e6756c7f9f1cbee928b80478b34d113046e5b4f3d5",
+    "tests/fixtures/prompt-maker/negative-requires-technology-decision.json": "0db60f4d647ac44bd12bd90144a2ad429892dff34dd354f9da0cd2999ecdfc58",
+    "tests/fixtures/prompt-maker/negative-unsupported-blueprint-schema.json": "a07a1ae01a3050b6caa7e3531bdd81b13dc93d5c2bc696def22e6a804c5247ef",
+    "tests/fixtures/prompt-maker/negative-unsupported-technology-profile.json": "e1d91301cdbe852d63e7e87a14c86368de1bff17dd525f6bcc4ccdf7a01b33bc"
+  }
+}
