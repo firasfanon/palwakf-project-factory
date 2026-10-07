@@ -118,18 +118,27 @@ if [[ "$GENERATE_SCAFFOLD" == "y" ]]; then
 fi
 
 # 3) اشتقاق المعرّفات البرمجية (slug) + بناء ملف الإعداد + الاستبدال الفعلي
-if [[ "$DB_SHARED" == "true" ]]; then
-  DB_SHARED_PY="True"
-else
-  DB_SHARED_PY="False"
-fi
-
+# أمان: مدخلات المستخدم تُمرَّر لبايثون كبيانات عبر متغيرات البيئة فقط، ونص بايثون ثابت (heredoc مقتبس).
+# ممنوع تضمين أي قيمة من المستخدم داخل شيفرة بايثون المولَّدة.
 CONFIG_FILE="$(mktemp)"
-python3 -c "
-import json, re
+GEN_PROJECT_NAME="$PROJECT_NAME" \
+GEN_SLUG_INPUT="$PROJECT_SLUG_INPUT" \
+GEN_PROJECT_TYPE="$PROJECT_TYPE" \
+GEN_PROJECT_STATUS="$PROJECT_STATUS" \
+GEN_PROJECT_OWNER="$PROJECT_OWNER" \
+GEN_PROJECT_DATE="$PROJECT_DATE" \
+GEN_PROJECT_GOAL="$PROJECT_GOAL" \
+GEN_PROFILE_NAME="$PROFILE_NAME" \
+GEN_FACTORY_VERSION="$FACTORY_VERSION" \
+GEN_DB_SHARED="$DB_SHARED" \
+GEN_RELATED_SYSTEMS_JSON="$RELATED_SYSTEMS_JSON" \
+GEN_CONFIG_FILE="$CONFIG_FILE" \
+python3 - <<'PY'
+import json, os, re
 
-name = '''$PROJECT_NAME'''
-slug_input = '''$PROJECT_SLUG_INPUT'''.strip()
+env = os.environ
+name = env['GEN_PROJECT_NAME']
+slug_input = env['GEN_SLUG_INPUT'].strip()
 raw = slug_input or name
 raw = raw.lower()
 raw = re.sub(r'[^a-z0-9]+', '_', raw).strip('_')
@@ -143,23 +152,23 @@ class_name = ''.join(part.capitalize() for part in raw.split('_') if part) or 'M
 
 config = {
     'PROJECT_NAME': name,
-    'PROJECT_TYPE': '''$PROJECT_TYPE''',
-    'PROJECT_STATUS': '''$PROJECT_STATUS''',
-    'PROJECT_OWNER': '''$PROJECT_OWNER''',
-    'PROJECT_DATE': '''$PROJECT_DATE''',
-    'PROJECT_GOAL': '''$PROJECT_GOAL''',
-    'PROFILE_NAME': '''$PROFILE_NAME''',
-    'FACTORY_VERSION': '''$FACTORY_VERSION''',
-    'DB_SHARED': $DB_SHARED_PY,
-    'RELATED_SYSTEMS': $RELATED_SYSTEMS_JSON,
+    'PROJECT_TYPE': env['GEN_PROJECT_TYPE'],
+    'PROJECT_STATUS': env['GEN_PROJECT_STATUS'],
+    'PROJECT_OWNER': env['GEN_PROJECT_OWNER'],
+    'PROJECT_DATE': env['GEN_PROJECT_DATE'],
+    'PROJECT_GOAL': env['GEN_PROJECT_GOAL'],
+    'PROFILE_NAME': env['GEN_PROFILE_NAME'],
+    'FACTORY_VERSION': env['GEN_FACTORY_VERSION'],
+    'DB_SHARED': env['GEN_DB_SHARED'] == 'true',
+    'RELATED_SYSTEMS': json.loads(env['GEN_RELATED_SYSTEMS_JSON']),
     'SLUG_SNAKE': slug_snake,
     'SLUG_KEBAB': slug_kebab,
     'CLASS_NAME': class_name,
 }
-with open('$CONFIG_FILE', 'w', encoding='utf-8') as f:
+with open(env['GEN_CONFIG_FILE'], 'w', encoding='utf-8') as f:
     json.dump(config, f, ensure_ascii=False)
 print(f'   المعرّف البرمجي المشتق: {slug_snake} (Dart) / {slug_kebab} (npm) / {class_name} (اسم الصنف)')
-"
+PY
 
 python3 "$FACTORY_DIR/substitute.py" "$OUTPUT_DIR" "$CONFIG_FILE"
 rm -f "$CONFIG_FILE"

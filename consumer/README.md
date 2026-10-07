@@ -33,5 +33,5 @@ Exit codes: 0 `MATERIALIZATION_READY`, 10 `BLOCKED_REQUIRES_TECHNOLOGY_DECISION`
   `PROJECT_TYPE` taken from the selected Factory profile (web / mobile).
 
 ## Tests
-`python3 -m unittest discover -s tests -v` (stdlib only). Includes a legacy `generate.sh` equivalence test against the base commit.
+`python3 -m unittest discover -s tests -v` (stdlib only, Linux and Git Bash/Windows). Includes a legacy `generate.sh` equivalence test against the base commit and an injection security regression with a control experiment (set `FACTORY_TEST_BASH` to override Bash discovery).
 Not covered here: `npm install/build/test` of the generated project (requires registry access) -- see CHANGELOG.

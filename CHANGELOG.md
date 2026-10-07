@@ -9,8 +9,14 @@
 - `consumer/adapter.py`: مستهلك `FACTORY_CONSUMER_SUBSET_V1` (Blueprint 1.1) بخمس نتائج مجمّدة، توليد حقيقي غير تفاعلي
   عند `MATERIALIZATION_READY` فقط، no-clobber، تهريب حسب صيغة الملف، وprovenance لكل مخرج.
 - `consumer/pin/` + `tests/fixtures/prompt-maker/`: نسخ مثبّتة (SHA-256) من عقد Prompt Maker commit `f659f92d` — ليست سلطة عقد.
-- `tests/test_consumer_adapter.py`: 38 اختبارًا (مصفوفة fixtures، pin، no-clobber، injection، secret residue، تطابق `generate.sh` القديم مع baseline).
+- `tests/test_consumer_adapter.py`: 41 اختبارًا (مصفوفة fixtures، pin، no-clobber، injection، secret residue، تطابق `generate.sh` مع baseline، واختبار أمني بتجربة ضابطة تثبت أن الثغرة القديمة قابلة للاستغلال). اكتشاف Bash محمول (Git Bash على ويندوز) وإدخال بايتات LF دقيقة.
 - `.gitattributes` لتثبيت LF على الملفات المثبّتة.
+
+### أمان (إصلاح ثغرة قائمة في `generate.sh`)
+- كان `generate.sh` يضمّن مدخلات المستخدم داخل شيفرة بايثون (`'''$PROJECT_NAME'''`…) ما يسمح بتنفيذ شيفرة اعتباطية. أصبحت القيم تُمرَّر عبر متغيرات بيئة إلى heredoc مقتبس ثابت (بيانات فقط، لا تضمين في المصدر).
+- `substitute.py`: استبدال المتغيرات بتمريرة واحدة (قيمة مُدخَلة تحوي `{{TOKEN}}` لا تُوسَّع).
+- فروق مقصودة وحيدة عن السلوك القديم (للمدخلات غير العادية فقط): (1) تسلسلات `\n`/`\\` داخل المدخلات تبقى حرفية بدل أن تُفسَّر كهروب بايثون؛ (2) نص `{{TOKEN}}` داخل مدخل المستخدم يبقى كما كتبه بدل أن يُوسَّع. المدخلات العادية: مخرجات مطابقة محتوى.
+- لم يُعالَج: صف السجل `PROJECTS_REGISTRY.md` يحتوي المدخل كما هو (محرف `|` يكسر الجدول فقط؛ ليس تنفيذ شيفرة).
 
 ### تغيّر
 - `substitute.py`: استُخرجت `build_tokens()` دون تغيير السلوك (يُثبته اختبار التكافؤ).

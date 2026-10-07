@@ -257,7 +257,10 @@ class MaterializationTests(unittest.TestCase):
         self.out.mkdir(parents=True)
         victim = Path(self.tmp.name) / "victim.txt"
         victim.write_text("SAFE", encoding="utf-8")
-        os.symlink(victim, self.out / "package.json")
+        try:
+            os.symlink(victim, self.out / "package.json")
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable on this host")
         self.run_golden()
         self.assertEqual(victim.read_text(encoding="utf-8"), "SAFE")
 
@@ -374,33 +377,198 @@ class CliTests(unittest.TestCase):
             self.assertFalse(Path(d + "/q").exists())
 
 
+def find_bash():
+    """Portable Bash discovery. Never hard-codes a user path; on Windows prefers Git Bash and
+    refuses the WSL launcher (System32\\bash.exe), which has different path semantics."""
+    cands = []
+    if os.environ.get("FACTORY_TEST_BASH"):
+        cands.append(os.environ["FACTORY_TEST_BASH"])
+    if os.name == "nt":
+        git = shutil.which("git")
+        if git:
+            root = Path(git).resolve().parent.parent          # <GitRoot>\cmd\git.exe -> <GitRoot>
+            cands += [str(root / "bin" / "bash.exe"), str(root.parent / "bin" / "bash.exe")]
+        for var in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
+            if os.environ.get(var):
+                cands.append(str(Path(os.environ[var]) / "Git" / "bin" / "bash.exe"))
+    else:
+        cands.append(shutil.which("bash") or "")
+    for c in cands:
+        if c and Path(c).is_file() and "system32" not in c.lower():
+            return c
+    return None
+
+
+def bash_has_python3(bash):
+    try:
+        r = subprocess.run([bash, "-c", "command -v python3 >/dev/null 2>&1"], capture_output=True, timeout=30)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def snapshot_text_normalized(d):
+    """Content snapshot independent of host newline policy (CRLF == LF)."""
+    d = Path(d)
+    return {p.relative_to(d).as_posix(): hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+            for p in sorted(d.rglob("*")) if p.is_file()}
+
+
+def extract_git_archive(commit, dest):
+    import io
+    import tarfile
+    r = subprocess.run(["git", "archive", commit], cwd=ROOT, capture_output=True)
+    if r.returncode != 0:
+        return False
+    with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tf:
+        tf.extractall(dest)
+    return True
+
+
+def copy_factory(dest):
+    shutil.copytree(ROOT, dest, ignore=lambda d, names: [
+        n for n in names if n in (".git", "__pycache__") or (Path(d) == ROOT and n == "tests")])
+
+
+BASH = find_bash()
+HAS_BASH = BASH is not None and bash_has_python3(BASH)
+
+
+def run_generate(factory_dir, answer_text, cwd, extra_env=None):
+    """Feeds EXACT UTF-8 LF bytes (no host newline translation) to the interactive generator."""
+    payload = answer_text.replace("\r\n", "\n").encode("utf-8")
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run([BASH, (Path(factory_dir) / "generate.sh").as_posix()], input=payload,
+                          capture_output=True, timeout=120, cwd=str(cwd), env=env)
+
+
+def answers(name, slug, ptype, status, owner, goal, profile, db_shared, related, scaffold, out):
+    lines = [name, slug, ptype, status, owner, goal, profile, db_shared]
+    if db_shared.lower() == "y":
+        lines += list(related) + [""]
+    if scaffold is not None:          # generic profile has no scaffold, so no scaffold question is asked
+        lines.append(scaffold)
+    lines.append(out)
+    return "\n".join(lines) + "\n"
+
+
+@unittest.skipUnless(HAS_BASH, "bash with python3 not available on this host")
 class LegacyGenerateRegressionTests(unittest.TestCase):
-    """The interactive generate.sh path must be byte-for-byte equivalent to the pre-Batch-B baseline
-    (substitute.py was refactored to expose build_tokens)."""
+    """generate.sh must keep producing the same project content for benign input as the pre-Batch-B
+    baseline (9aeff39). Compared by content with CRLF/LF normalization (host newline policy is irrelevant)."""
 
-    ANSWERS = "اختبار قديم\nlegacy-demo\nweb\nتطوير\nالمالك\nهدف تجريبي\n3\nn\ny\n{out}\n"
+    def benign(self, out):
+        return answers("اختبار قديم", "legacy-demo", "web", "تطوير", "المالك", "هدف تجريبي", "3", "y",
+                       ["نظام أ:مشترك:ملاحظة"], "y", out)
 
-    def run_legacy(self, factory_dir, out):
-        return subprocess.run(["bash", str(factory_dir / "generate.sh")], input=self.ANSWERS.format(out=out),
-                              capture_output=True, text=True, timeout=60)
+    @staticmethod
+    def registry_last_row(path, out):
+        row = Path(path).read_text(encoding="utf-8").replace("\r\n", "\n").splitlines()[-1]
+        return row.replace(out.as_posix(), "OUT").replace(str(out), "OUT")
 
-    def test_legacy_output_identical_to_base_commit(self):
+    def test_benign_output_equivalent_to_base_commit(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            base, cur = t / "base", t / "cur"
+            base.mkdir()
+            if not extract_git_archive(BASE_FACTORY_HEAD, base):
+                self.skipTest("base commit not available in this (shallow) clone")
+            copy_factory(cur)
+            wb, wc = t / "wb", t / "wc"
+            wb.mkdir()
+            wc.mkdir()
+            ob, oc = t / "out_base", t / "out_cur"
+            rb = run_generate(base, self.benign(ob.as_posix()), wb)
+            rc = run_generate(cur, self.benign(oc.as_posix()), wc)
+            self.assertEqual(rb.returncode, 0, rb.stderr.decode("utf-8", "replace"))
+            self.assertEqual(rc.returncode, 0, rc.stderr.decode("utf-8", "replace"))
+            a, b = snapshot_text_normalized(ob), snapshot_text_normalized(oc)
+            self.assertGreater(len(b), 40)
+            self.assertEqual(a, b)
+            self.assertEqual(self.registry_last_row(base / "PROJECTS_REGISTRY.md", ob),
+                             self.registry_last_row(cur / "PROJECTS_REGISTRY.md", oc))
+
+    def test_every_profile_choice_runs_in_isolated_copy(self):
+        for choice, marker in (("1", None), ("2", "pubspec.yaml"), ("3", "package.json")):
+            with tempfile.TemporaryDirectory() as t:
+                t = Path(t)
+                cur = t / "cur"
+                copy_factory(cur)
+                out = t / "o"
+                r = run_generate(cur, answers("p", "", "web", "تخطيط", "o", "g", choice, "n", [], None if choice == "1" else "y", out.as_posix()), t)
+                self.assertEqual(r.returncode, 0, r.stderr.decode("utf-8", "replace"))
+                self.assertTrue((out / "docs/ai/00_MASTER_CONTEXT.md").is_file())
+                if marker:
+                    self.assertTrue((out / marker).is_file(), marker)
+
+
+HOSTILE_NAME = "N'''; import os; os.system('touch PWNED_PY_NAME'); x=''' \\n \\\\ \"q\" $(touch PWNED_SH_NAME) `touch PWNED_BT_NAME` ; {{PROJECT_OWNER}} {{PROJECT_STATUS}}"
+HOSTILE_GOAL = "G'''+__import__('os').system('touch PWNED_PY_GOAL')+''' \\ $(touch PWNED_SH_GOAL) ; ' \" {{PROJECT_NAME}}"
+HOSTILE_OWNER = "O\"; touch PWNED_SH_OWNER; \"'''; import os; os.system('touch PWNED_PY_OWNER'); '''"
+HOSTILE_TYPE = "web'''+__import__('os').environ['SECRET_CANARY']+'''"
+HOSTILE_STATUS = "S'''; open('PWNED_PY_STATUS','w').write('x'); '''"
+HOSTILE_SLUG = "slug'''; import os; os.system('touch PWNED_PY_SLUG'); '''"
+HOSTILE_REL = "R'''; import os; os.system('touch PWNED_PY_REL'); ''':t:$(touch PWNED_SH_REL)"
+SECRET = "SUPER_SECRET_CANARY_9f3c1d7a"
+
+
+@unittest.skipUnless(HAS_BASH, "bash with python3 not available on this host")
+class GenerateInjectionSecurityTests(unittest.TestCase):
+    """USER_INPUT MUST NEVER BE EMBEDDED INTO GENERATED PYTHON SOURCE. Behavior is proven on the filesystem."""
+
+    def hostile_answers(self, out):
+        return answers(HOSTILE_NAME, HOSTILE_SLUG, HOSTILE_TYPE, HOSTILE_STATUS, HOSTILE_OWNER, HOSTILE_GOAL,
+                       "3", "y", [HOSTILE_REL], "y", out)
+
+    @staticmethod
+    def canaries(root):
+        return sorted(p.relative_to(root).as_posix() for p in Path(root).rglob("PWNED_*"))
+
+    def test_hostile_input_executes_nothing_and_is_preserved_as_data(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            cur = t / "cur"
+            copy_factory(cur)
+            sandbox = t / "sandbox"
+            sandbox.mkdir()
+            out = t / "out"
+            r = run_generate(cur, self.hostile_answers(out.as_posix()), sandbox, {"SECRET_CANARY": SECRET})
+            self.assertEqual(r.returncode, 0, r.stderr.decode("utf-8", "replace"))
+            # NO SHELL / PYTHON EXECUTION and NO FILE OUTSIDE EXPECTED OUTPUT
+            self.assertEqual(self.canaries(t), [], "an injected command executed")
+            self.assertEqual(sorted(p.name for p in t.iterdir()), ["cur", "out", "sandbox"])
+            self.assertEqual(list(sandbox.iterdir()), [])
+            # NO SECRET EXPOSURE
+            self.assertNotIn(SECRET.encode(), r.stdout + r.stderr)
+            for p in out.rglob("*"):
+                if p.is_file():
+                    self.assertNotIn(SECRET.encode(), p.read_bytes(), str(p))
+            self.assertNotIn(SECRET, (cur / "PROJECTS_REGISTRY.md").read_text(encoding="utf-8"))
+            # VALID CONTENT PRESERVED AS DATA (literal quotes, backslashes, $(), backticks, token-like text)
+            master = (out / "docs/ai/00_MASTER_CONTEXT.md").read_text(encoding="utf-8")
+            self.assertIn(HOSTILE_NAME, master)
+            self.assertIn(HOSTILE_GOAL, master)
+            self.assertIn(HOSTILE_OWNER, master)
+            self.assertIn("{{PROJECT_OWNER}} {{PROJECT_STATUS}}", master, "token-like text in input must not be expanded")
+            pkg = json.loads((out / "package.json").read_text(encoding="utf-8"))
+            self.assertEqual(pkg["name"], "slug-import-os-os-system-touch-pwned-py-slug")
+
+    def test_control_experiment_baseline_is_exploitable(self):
+        """Control: a minimal hostile goal DOES execute against the pre-fix baseline, proving the regression above
+        can fail. Harmless canary only (touch inside a throwaway sandbox)."""
+        probe = "g'''+str(__import__('os').system('touch PWNED_CTRL'))+'''"
         with tempfile.TemporaryDirectory() as t:
             t = Path(t)
             base = t / "base"
             base.mkdir()
-            tar = subprocess.run(["git", "archive", BASE_FACTORY_HEAD], cwd=ROOT, capture_output=True)
-            if tar.returncode != 0:
+            if not extract_git_archive(BASE_FACTORY_HEAD, base):
                 self.skipTest("base commit not available in this (shallow) clone")
-            subprocess.run(["tar", "-x", "-C", str(base)], input=tar.stdout, check=True)
-            cur = t / "cur"
-            shutil.copytree(ROOT, cur, ignore=lambda d, names: [n for n in names if n in (".git", "__pycache__") or (Path(d) == ROOT and n == "tests")])
-            rb = self.run_legacy(base, t / "out_base")
-            rc = self.run_legacy(cur, t / "out_cur")
-            self.assertEqual(rb.returncode, 0, rb.stderr)
-            self.assertEqual(rc.returncode, 0, rc.stderr)
-            self.assertEqual(tree_snapshot(t / "out_base"), tree_snapshot(t / "out_cur"))
-            self.assertGreater(len(tree_snapshot(t / "out_cur")), 40)
+            sandbox = t / "sandbox"
+            sandbox.mkdir()
+            run_generate(base, answers("n", "s", "web", "x", "o", probe, "3", "n", [], "y", (t / "out").as_posix()), sandbox)
+            self.assertTrue(self.canaries(t), "baseline unexpectedly NOT exploitable: this regression would be vacuous")
 
 
 if __name__ == "__main__":

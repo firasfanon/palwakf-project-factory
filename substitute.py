@@ -6,9 +6,11 @@
 لا يعتمد على مكتبات خارجية — Python القياسية فقط.
 """
 import json
+import re
 import sys
 from pathlib import Path
 
+_TOKEN_RE = re.compile(r"\{\{([A-Z_]+)\}\}")
 SKIP_DIR_NAMES = {".git", "node_modules", ".dart_tool", "build", "dist"}
 
 
@@ -74,8 +76,8 @@ def main():
             skipped_binary += 1
             continue
         original = text
-        for key, value in tokens.items():
-            text = text.replace("{{" + key + "}}", value)
+        # تمريرة واحدة: قيمة مُستبدَلة لا يُعاد فحصها (لا حقن متغيرات عبر مدخلات المستخدم)
+        text = _TOKEN_RE.sub(lambda m: tokens.get(m.group(1), m.group(0)), text)
         if text != original:
             file_path.write_text(text, encoding="utf-8")
             changed += 1
