@@ -5,6 +5,18 @@
 
 ## [Unreleased] — Prompt Maker consumer adapter (لم يُرقَّم VERSION بعد)
 
+### أُصلح — FACTORY-VITE-ENV-FIX-V1 (قالب `react-vite-supabase`)
+- العيب: فشل `tsc` (ضمن `npm run build` = `tsc && vite build`) بـ`TS2339: Property 'env' does not exist on type 'ImportMeta'`
+  لأن القالب لا يحمّل أنواع `vite/client`.
+- الإصلاح (الحد الأدنى): إضافة `profiles/react-vite-supabase/scaffold/src/vite-env.d.ts` (مرجع `vite/client` + تعريف
+  `VITE_SUPABASE_URL` و`VITE_SUPABASE_ANON_KEY`). لم يُستخدم `compilerOptions.types` كي لا تُحجب أنواع `@types/*`.
+- لا تغيير في `consumer/adapter.py` ولا في عقود المستهلك ولا الـpins ولا fixtures ولا `generate.sh`/`substitute.py`.
+- اختبارات: `tests/test_vite_env_fix.py` (5) — وجود الملف في المخرجات وفي provenance ببصمته، تطابق المتغيرات المعرّفة مع
+  المستخدمة و`.env.example`، وتجربة ضابطة بـ`tsc --strict` على `src/lib/supabase.ts` المولَّد مع بدائل فارغة لـ`vite/client`
+  و`@supabase/supabase-js`: بدون الملف ⇒ `TS2339`، معه ⇒ صفر تشخيصات.
+- اختبار التكافؤ القديم مع `9aeff39` صار يسمح **بإضافة واحدة فقط** هي `src/vite-env.d.ts` ويشترط تطابق كل ما عداها.
+- حدود: `npm ci && npm run build` الكامل للمشروع المولَّد يحتاج سجل npm؛ نتيجته تُسجَّل في دليل التكامل (لا يُفترض نجاحه).
+
 ### أُصلح (اختبارات فقط) — FACTORY-PYTHON-PREFLIGHT-V1
 - `bash_has_python3` صار تحققًا تنفيذيًا محدود الزمن (تشغيل `python3 -c` فعليًا والتحقق من المخرج والخروج 0) بدل `command -v`، لأن اختصار Microsoft Store على ويندوز يُعثر عليه بـ`command -v` ولا يعمل. 7 اختبارات انحدار (stub فاشل، مخرج خاطئ، تعليق مع timeout، لا python، bash مفقود، python سليم). لا تغيير في `generate.sh` أو adapter أو القوالب أو الـpins.
 

@@ -24,6 +24,7 @@ PM_GOLDEN = "df3e618dc3ef9abaf3878b3a6cda81e3c55f01b78182fc49ffe4b79160aa222e"
 PM_MAPPING = "74b71c798e1f73b41450cf8a5b93e2e7c1183f70bb7146f4f78377332c0fa5ec"
 PM_SCHEMA = "c0ce0b73a1e8e80697216445c10e654fc2f0ea5cbc32cdc8617c6ebb681ca9cb"
 BASE_FACTORY_HEAD = "9aeff39e960503691d642d64f2eddb60fa10dd3e"
+VITE_ENV_REL = "src/vite-env.d.ts"  # sole additive scaffold file of FACTORY-VITE-ENV-FIX-V1
 
 
 def fx(name):
@@ -546,7 +547,11 @@ class LegacyGenerateRegressionTests(unittest.TestCase):
             self.assertEqual(rc.returncode, 0, rc.stderr.decode("utf-8", "replace"))
             a, b = snapshot_text_normalized(ob), snapshot_text_normalized(oc)
             self.assertGreater(len(b), 40)
-            self.assertEqual(a, b)
+            # FACTORY-VITE-ENV-FIX-V1: the only intended difference from the base commit is the ADDED
+            # scaffold file src/vite-env.d.ts (TS2339 fix). Everything the base produced must be identical.
+            added = {k: b[k] for k in set(b) - set(a)}
+            self.assertEqual(set(added), {VITE_ENV_REL}, "unexpected additions: %s" % sorted(added))
+            self.assertEqual({k: v for k, v in b.items() if k in a}, a)
             self.assertEqual(self.registry_last_row(base / "PROJECTS_REGISTRY.md", ob),
                              self.registry_last_row(cur / "PROJECTS_REGISTRY.md", oc))
 
