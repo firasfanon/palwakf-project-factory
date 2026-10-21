@@ -405,19 +405,54 @@ PY_PREFLIGHT_EXPECTED = b"PREFLIGHT_OK:3"
 
 
 def bash_has_python3(bash, env=None, timeout=20):
-    """Bounded EXECUTABLE verification of `python3` as seen by `bash`.
+    """Prove runnable Python 3 inside bash with a truly bounded process-tree timeout.
 
-    `command -v python3` only proves a name resolves (e.g. the Windows Store alias stub resolves but
-    cannot run). Here python3 must actually start, run a one-line program within `timeout` seconds,
-    exit 0 and print the exact expected Python-3 token. Any failure, hang, wrong output or missing
-    interpreter -> False (fail closed: the dependent tests are skipped, never run against a broken python)."""
+    Killing only the immediate Git Bash process on Windows can leave its Python stub's
+    child holding captured stdout/stderr open, defeating subprocess.run(timeout=...).
+    The timeout path terminates the entire subprocess tree; no stub or terminal
+    process gains elevated privileges or external execution authority.
+    """
+    import signal
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     try:
-        r = subprocess.run([bash, "-c", 'python3 -c "$1"', "bash", PY_PREFLIGHT_PROBE],
-                           capture_output=True, timeout=timeout, env=env, stdin=subprocess.DEVNULL)
+        process = subprocess.Popen(
+            [bash, "-c", 'python3 -c "$1"', "bash", PY_PREFLIGHT_PROBE],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+            env=env, creationflags=creationflags, start_new_session=os.name != "nt",
+        )
     except (OSError, subprocess.SubprocessError):
         return False
-    return r.returncode == 0 and r.stdout.strip() == PY_PREFLIGHT_EXPECTED
-
+    try:
+        try:
+            stdout, _ = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            if os.name == "nt":
+                # /T kills grandchildren holding inherited pipe handles (Git Bash).
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        stdin=subprocess.DEVNULL, timeout=5, check=False,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if process.poll() is None:
+                process.kill()
+            # Bound cleanup too; do not wait for an orphaned descendant.
+            try:
+                process.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+            return False
+        return process.returncode == 0 and stdout.strip() == PY_PREFLIGHT_EXPECTED
+    finally:
+        if process.poll() is None:
+            process.kill()
 
 def snapshot_text_normalized(d):
     """Content snapshot independent of host newline policy (CRLF == LF)."""
